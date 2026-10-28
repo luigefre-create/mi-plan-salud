@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>My Healthly Life</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#0f172a">
   <style>
@@ -137,6 +138,12 @@
       font-size: 1.1rem;
       font-weight: bold;
       color: #f8fafc;
+    }
+
+    .chart-container {
+      margin-top: 16px;
+      height: 150px;
+      width: 100%;
     }
 
     /* Secciones Generales */
@@ -517,10 +524,10 @@
     <!-- COLUMNA IZQUIERDA EN PC -->
     <div style="display: flex; flex-direction: column; gap: 16px;">
       <!-- Perfil de Usuario -->
-      <div class="user-profile-card">
+      <div class="user-profile-card" onclick="abrirModalPerfil()" style="cursor: pointer;" title="Editar Perfil">
         <h2>My Healthly Life</h2>
-        <div class="user-profile-info">
-          Hombre | 50 años | <span id="pesoPerfil">120 kg</span> | Control Metabólico
+        <div class="user-profile-info" id="perfilResumen">
+          Cargando perfil...
         </div>
       </div>
 
@@ -547,6 +554,13 @@
             <span class="metrica-titulo">Estado Ayuno</span>
             <span class="metrica-valor" id="displayEstadoAyuno">Inactivo</span>
           </div>
+          <div class="metrica-item col-span-full" style="grid-column: span 2;">
+            <span class="metrica-titulo">IMC Actual</span>
+            <span class="metrica-valor" id="displayIMC">--</span>
+          </div>
+        </div>
+        <div class="chart-container">
+          <canvas id="pesoChart"></canvas>
         </div>
       </section>
 
@@ -663,6 +677,37 @@
     </div>
   </div>
 
+  <!-- MODAL PERFIL: EDITAR DATOS USUARIO -->
+  <div class="modal-overlay" id="modalPerfil">
+    <div class="modal-content">
+      <div class="modal-icon">👤</div>
+      <h3>Editar Perfil</h3>
+      <p>Configura tus datos para personalizar el plan</p>
+      
+      <div style="text-align: left; margin-top: 12px;">
+        <label style="font-size: 0.8rem; color: #94a3b8;">Género</label>
+        <select id="inputGenero" class="modal-input" style="width: 100%; margin-bottom: 12px;">
+          <option value="Hombre">Hombre</option>
+          <option value="Mujer">Mujer</option>
+        </select>
+        
+        <label style="font-size: 0.8rem; color: #94a3b8;">Edad</label>
+        <input type="number" id="inputEdad" class="modal-input" placeholder="Ej: 50">
+        
+        <label style="font-size: 0.8rem; color: #94a3b8;">Altura (metros)</label>
+        <input type="number" id="inputAltura" class="modal-input" step="0.01" placeholder="Ej: 1.75">
+
+        <label style="font-size: 0.8rem; color: #94a3b8;">Objetivo</label>
+        <input type="text" id="inputObjetivo" class="modal-input" placeholder="Ej: Control Metabólico">
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn-modal-cancel" onclick="cerrarModal('modalPerfil')">Cancelar</button>
+        <button class="btn-modal-save" onclick="guardarPerfilModal()">Guardar</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const menusSemanales = {
       0: { dia: "Domingo", c1: "✓ Omelette de 2 a 3 huevos con tomate picado y aceite de oliva.", c2: "✓ Pechuga de pollo a la plancha con ensalada mixta y palta.", c3: "✓ Tortilla liviana de espinaca o acelga con infusión sin azúcar." },
@@ -676,16 +721,24 @@
 
     let agua = 0;
     let peso = "120";
+    let altura = 1.70; 
+    let genero = "Hombre";
+    let edad = "50";
+    let objetivo = "Control Metabólico";
+    let historialPeso = []; 
     let inicioAyuno = null;
     let timerInterval = null;
     let fechaInicioPlan = null;
     const duracionAyunoSegundos = 16 * 3600;
+
+    let chartInstance = null;
 
     document.addEventListener("DOMContentLoaded", () => {
       cargarDatos();
       generarMenuPorDia();
       actualizarTimer();
       timerInterval = setInterval(actualizarTimer, 1000);
+      initChart();
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('sw.js');
       }
@@ -702,9 +755,21 @@
 
     function guardarTodo() {
       const ejercicios = Array.from(document.querySelectorAll('.chk-ejercicio')).map(cb => cb.checked);
-      const estado = { agua, peso, inicioAyuno, fechaInicioPlan, ejercicios };
+      const estado = { 
+        agua, 
+        peso, 
+        altura, 
+        genero, 
+        edad, 
+        objetivo, 
+        historialPeso, 
+        inicioAyuno, 
+        fechaInicioPlan, 
+        ejercicios 
+      };
       localStorage.setItem('my_healthly_life_data', JSON.stringify(estado));
       actualizarInterfaz();
+      updateChart();
     }
 
     function guardarTodoAlert() {
@@ -718,8 +783,18 @@
         const estado = JSON.parse(datosGuardados);
         agua = estado.agua || 0;
         peso = estado.peso || "120";
+        altura = estado.altura || 1.70;
+        genero = estado.genero || "Hombre";
+        edad = estado.edad || "50";
+        objetivo = estado.objetivo || "Control Metabólico";
+        historialPeso = estado.historialPeso || [];
         inicioAyuno = estado.inicioAyuno || null;
         fechaInicioPlan = estado.fechaInicioPlan || new Date().toISOString();
+
+        // Si no hay historial, iniciamos con el peso actual
+        if (historialPeso.length === 0) {
+          historialPeso.push({ fecha: new Date().toLocaleDateString(), valor: peso });
+        }
 
         if (estado.ejercicios) {
           const checkboxes = document.querySelectorAll('.chk-ejercicio');
@@ -743,8 +818,14 @@
       const dias = Math.floor(diffTiempo / (1000 * 60 * 60 * 24)) + 1;
       document.getElementById('diasEnPlan').innerText = `${dias} d`;
 
+      // Perfil Resumen
+      document.getElementById('perfilResumen').innerText = `${genero} | ${edad} años | ${peso} kg | ${objetivo}`;
+
       document.getElementById('displayPeso').innerText = `${peso} kg`;
-      document.getElementById('pesoPerfil').innerText = `${peso} kg`;
+      
+      // Cálculo dinámico de IMC
+      const imc = (parseFloat(peso) / (altura * altura)).toFixed(1);
+      document.getElementById('displayIMC').innerText = imc;
       
       const vasos = Math.floor(agua / 250);
       document.getElementById('displayAguaMetrica').innerText = `${agua} ml`;
@@ -783,8 +864,91 @@
       const val = document.getElementById('inputModalPeso').value;
       if (val && !isNaN(val) && val > 0) {
         peso = parseFloat(val).toFixed(1);
+        
+        // Agregar al historial si el último valor es de un día distinto o el peso cambió
+        const hoy = new Date().toLocaleDateString();
+        if (historialPeso.length === 0 || historialPeso[historialPeso.length - 1].fecha !== hoy) {
+          historialPeso.push({ fecha: hoy, valor: peso });
+          // Mantener solo los últimos 7 registros
+          if (historialPeso.length > 7) historialPeso.shift();
+        } else {
+          historialPeso[historialPeso.length - 1].valor = peso;
+        }
+
         guardarTodo();
         cerrarModal('modalPeso');
+      }
+    }
+
+    /* MODAL PERFIL */
+    function abrirModalPerfil() {
+      document.getElementById('inputGenero').value = genero;
+      document.getElementById('inputEdad').value = edad;
+      document.getElementById('inputAltura').value = altura;
+      document.getElementById('inputObjetivo').value = objetivo;
+      document.getElementById('modalPerfil').classList.add('active');
+    }
+
+    function guardarPerfilModal() {
+      const g = document.getElementById('inputGenero').value;
+      const e = document.getElementById('inputEdad').value;
+      const a = document.getElementById('inputAltura').value;
+      const o = document.getElementById('inputObjetivo').value;
+
+      if (a && !isNaN(a) && a > 0) {
+        genero = g;
+        edad = e;
+        altura = parseFloat(a);
+        objetivo = o;
+        guardarTodo();
+        cerrarModal('modalPerfil');
+      } else {
+        alert("Por favor ingresa una altura válida");
+      }
+    }
+
+    /* GRÁFICO DE PESO */
+    function initChart() {
+      const ctx = document.getElementById('pesoChart').getContext('2d');
+      chartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: historialPeso.map(h => h.fecha),
+          datasets: [{
+            label: 'Peso (kg)',
+            data: historialPeso.map(h => h.valor),
+            borderColor: '#38bdf8',
+            backgroundColor: 'rgba(56, 189, 248, 0.2)',
+            borderWidth: 2,
+            fill: true,
+            tension: 0.4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false }
+          },
+          scales: {
+            y: {
+              grid: { color: '#334155' },
+              ticks: { color: '#94a3b8', font: { size: 10 } }
+            },
+            x: {
+              grid: { display: false },
+              ticks: { color: '#94a3b8', font: { size: 10 } }
+            }
+          }
+        }
+      });
+    }
+
+    function updateChart() {
+      if (chartInstance) {
+        chartInstance.data.labels = historialPeso.map(h => h.fecha);
+        chartInstance.data.datasets[0].data = historialPeso.map(h => h.valor);
+        chartInstance.update();
       }
     }
 
